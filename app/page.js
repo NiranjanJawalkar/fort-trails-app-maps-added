@@ -88,9 +88,11 @@ export default function Home() {
     return data;
   }
 
-  function showToast(msg) {
+  function showToast(msg, duration = 6000) {
+    console.log('[Fort Trails]', msg);
     setToastMsg(msg);
-    setTimeout(() => setToastMsg(''), 2500);
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => setToastMsg(''), duration);
   }
 
   function saveMyName() {
@@ -538,6 +540,7 @@ function AlbumModal({ entry, myName, onClose, onAddPhotos, onRemovePhoto, showTo
       onAddPhotos(photos);
       showToast('Photos added to the album');
     } catch (e) {
+      console.error('[Fort Trails] photo upload failed:', e);
       showToast(e.message || 'Upload failed — check your connection');
     }
     setUploading(false);
@@ -840,6 +843,7 @@ function EntryModal({ mode, myName, regionOptions, onAddCategory, onClose, onSav
         try {
           photos = await uploadPhotosToBlob(files, name.trim());
         } catch (e) {
+          console.error('[Fort Trails] photo upload failed:', e);
           showToast((e.message || 'Photo upload failed') + ' — saving without photos');
         }
       }
