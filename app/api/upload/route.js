@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 
-// Generates a short-lived, single-file upload URL. This avoids the older
+// Generates a short-lived, single-file upload URL for the private Blob store. This avoids the older
 // client-token flow, which requires BLOB_READ_WRITE_TOKEN. The current Vercel
 // Blob SDK can authenticate server-side with either OIDC (recommended on
 // Vercel) or the legacy BLOB_READ_WRITE_TOKEN.
@@ -35,7 +35,7 @@ export async function POST(request) {
     const { presignedUrl } = await presignUrl(token, {
       pathname,
       operation: 'put',
-      access: 'public',
+      access: 'private',
       validUntil,
       allowedContentTypes,
       maximumSizeInBytes

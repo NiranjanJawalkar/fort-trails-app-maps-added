@@ -9,6 +9,22 @@ const RealMap = dynamic(() => import('../components/RealMap'), {
   loading: () => <div className="loading-hint">Loading map…</div>
 });
 
+// Private Vercel Blob files cannot be displayed using their clean storage URL.
+// Ask our authenticated server route for a short-lived signed GET URL instead.
+function getPhotoSrc(photo) {
+  const url = typeof photo === 'string' ? photo : photo?.url;
+  if (!url) return '';
+
+  try {
+    const parsed = new URL(url, window.location.origin);
+    if (parsed.hostname.includes('.private.blob.vercel-storage.com')) {
+      return `/api/photo?url=${encodeURIComponent(url)}`;
+    }
+  } catch {}
+
+  return url;
+}
+
 // Uploads files directly from the browser to Vercel Blob using a short-lived
 // presigned URL. The photo bytes never pass through the Next.js function, so
 // large phone photos are not affected by Vercel's function request limit.
@@ -408,7 +424,7 @@ function OverviewView({ entries, trips, avgRating, onLog, onFocusEntry, onOpenAl
         <div className="lightbox-grid" style={{ marginBottom: 32 }}>
           {recentPhotos.map((p) => (
             <div className="ph" key={p.id} onClick={() => onOpenAlbum(p.entryId)} style={{ cursor: 'pointer' }}>
-              <img src={p.url} alt={p.entryName} />
+              <img src={getPhotoSrc(p)} alt={p.entryName} />
               <div
                 style={{
                   position: 'absolute',
@@ -484,7 +500,7 @@ function Card({ e, renderExtra, onDelete }) {
   const cover = e.photos && e.photos.length ? e.photos[0].url : null;
   return (
     <div className="card">
-      <div className={'thumb' + (cover ? '' : ' empty')} style={cover ? { backgroundImage: `url(${cover})` } : undefined}>
+      <div className={'thumb' + (cover ? '' : ' empty')} style={cover ? { backgroundImage: `url(${getPhotoSrc(e.photos[0])})` } : undefined}>
         <div className={'badge' + (e.status === 'wishlist' ? ' wishlist' : '')}>
           {e.status === 'wishlist' ? 'Wishlist' : 'Visited'}
         </div>
@@ -544,8 +560,8 @@ function GalleryView({ entries, onOpenAlbum }) {
           {withPhotos.map((e) => (
             <div className="album-card" key={e.id} onClick={() => onOpenAlbum(e.id)}>
               <div className="album-stack">
-                {e.photos[1] && <img className="stack-2" src={e.photos[1].url} alt="" />}
-                <img className="stack-1" src={e.photos[0].url} alt={e.name} />
+                {e.photos[1] && <img className="stack-2" src={getPhotoSrc(e.photos[1])} alt="" />}
+                <img className="stack-1" src={getPhotoSrc(e.photos[0])} alt={e.name} />
               </div>
               <div className="album-info">
                 <h4>{e.name}</h4>
@@ -608,7 +624,7 @@ function AlbumModal({ entry, myName, onClose, onAddPhotos, onRemovePhoto, showTo
         <div className="lightbox-grid" style={{ marginTop: 16 }}>
           {(entry.photos || []).map((p) => (
             <div className="ph" key={p.id}>
-              <img src={p.url} alt="" />
+              <img src={getPhotoSrc(p)} alt="" />
               <button className="rm" onClick={() => onRemovePhoto(p.id)} title="Remove photo">✕</button>
             </div>
           ))}
