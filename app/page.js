@@ -685,14 +685,27 @@ function TripModal({ onClose, onSaved }) {
   async function save() {
     if (!name.trim()) return;
     setSaving(true);
-    const res = await fetch('/api/trips', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, date, notes })
-    });
-    const data = await res.json();
-    setSaving(false);
-    if (data.trip) onSaved(data.trip);
+    try {
+      const res = await fetch('/api/trips', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, date, notes })
+      });
+      let data;
+      try {
+        data = await res.json();
+      } catch (e) {
+        throw new Error(`Server returned an unexpected response (status ${res.status})`);
+      }
+      if (!res.ok || data.error) {
+        throw new Error(data.error || `Save failed (status ${res.status})`);
+      }
+      if (data.trip) onSaved(data.trip);
+    } catch (e) {
+      alert(e.message || 'Something went wrong — please try again');
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -806,45 +819,61 @@ function EntryModal({ mode, myName, regionOptions, onAddCategory, onClose, onSav
     }
     setSaving(true);
 
-    let photos = [];
-    if (files.length) {
-      const fd = new FormData();
-      files.forEach((f) => fd.append('files', f));
-      fd.append('folder', name.trim());
-      try {
-        const upRes = await fetch('/api/upload', { method: 'POST', body: fd });
-        const upData = await upRes.json();
-        if (upData.error) {
-          showToast(upData.error + ' (saving without photos)');
-        } else {
-          photos = upData.photos;
+    try {
+      let photos = [];
+      if (files.length) {
+        const fd = new FormData();
+        files.forEach((f) => fd.append('files', f));
+        fd.append('folder', name.trim());
+        try {
+          const upRes = await fetch('/api/upload', { method: 'POST', body: fd });
+          const upData = await upRes.json();
+          if (upData.error) {
+            showToast(upData.error + ' (saving without photos)');
+          } else {
+            photos = upData.photos;
+          }
+        } catch (e) {
+          showToast('Photo upload failed — saving without photos');
         }
-      } catch (e) {
-        showToast('Photo upload failed — saving without photos');
       }
-    }
 
-    const res = await fetch('/api/entries', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        status: mode,
-        name,
-        region,
-        difficulty,
-        date: mode === 'visited' ? date : '',
-        companions: mode === 'visited' ? companions : '',
-        rating: mode === 'visited' ? rating : 0,
-        notes,
-        addedBy: myName || 'Someone',
-        photos,
-        lat: lat.trim() ? parseFloat(lat) : null,
-        lng: lng.trim() ? parseFloat(lng) : null
-      })
-    });
-    const data = await res.json();
-    setSaving(false);
-    if (data.entry) onSaved(data.entry);
+      const res = await fetch('/api/entries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: mode,
+          name,
+          region,
+          difficulty,
+          date: mode === 'visited' ? date : '',
+          companions: mode === 'visited' ? companions : '',
+          rating: mode === 'visited' ? rating : 0,
+          notes,
+          addedBy: myName || 'Someone',
+          photos,
+          lat: lat.trim() ? parseFloat(lat) : null,
+          lng: lng.trim() ? parseFloat(lng) : null
+        })
+      });
+
+      let data;
+      try {
+        data = await res.json();
+      } catch (e) {
+        throw new Error(`Server returned an unexpected response (status ${res.status})`);
+      }
+
+      if (!res.ok || data.error) {
+        throw new Error(data.error || `Save failed (status ${res.status})`);
+      }
+
+      if (data.entry) onSaved(data.entry);
+    } catch (e) {
+      showToast(e.message || 'Something went wrong — please try again');
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (

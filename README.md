@@ -100,6 +100,19 @@ test uploads after deploying.
 - Coordinates are optional — places without them just won't have a pin, and
   still show up fine everywhere else in the app.
 
+## Troubleshooting
+
+**"Saving…" button never finishes / nothing gets logged:**
+Almost always means the app can't reach the database. Check:
+- Storage tab → confirm both **Blob** and **Redis (Upstash)** show as *Connected* to this project (not just created)
+- Redeploy after connecting either one — env vars only apply to new deployments
+- Vercel injects the Redis credentials as either `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN`
+  or the older `KV_REST_API_URL`/`KV_REST_API_TOKEN` naming depending on how the integration
+  was installed — this app checks for both, so either works
+- For the exact error: Project → your latest Deployment → **Runtime Logs** (or the
+  **Observability** tab), then try the failing action again and watch for the request —
+  the error message will say exactly what failed
+
 ## Notes / things you may want to extend
 
 - **Real map coordinates**: the trail map on Overview currently places pins
