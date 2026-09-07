@@ -102,6 +102,17 @@ test uploads after deploying.
 
 ## Troubleshooting
 
+**Photos silently not saving / gallery never fills up:**
+Photos upload **directly from the browser to Vercel Blob**, not through a
+server function — this is intentional. Vercel Functions have a hard 4.5MB
+request size limit that can't be raised, and real phone photos are routinely
+bigger than that, so routing the file bytes through a function would silently
+fail for most real-world photos. If uploads still fail after this:
+- Confirm Blob shows as *Connected* (not just created) on the Storage tab
+- Redeploy after connecting it
+- Check the toast message shown after a failed upload — it now surfaces the
+  actual error instead of failing silently
+
 **"Saving…" button never finishes / nothing gets logged:**
 Almost always means the app can't reach the database. Check:
 - Storage tab → confirm both **Blob** and **Redis (Upstash)** show as *Connected* to this project (not just created)

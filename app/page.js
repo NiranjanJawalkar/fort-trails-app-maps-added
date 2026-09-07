@@ -2,12 +2,35 @@
 
 import { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
+import { upload } from '@vercel/blob/client';
 import { MAHARASHTRA_DISTRICTS } from '../lib/districts';
 
 const RealMap = dynamic(() => import('../components/RealMap'), {
   ssr: false,
   loading: () => <div className="loading-hint">Loading map…</div>
 });
+
+// Uploads files straight from the browser to Vercel Blob (bypasses the
+// 4.5MB Vercel Function body limit that phone photos routinely exceed).
+async function uploadPhotosToBlob(files, folder) {
+  const safeFolder = (folder || 'general').replace(/[^a-z0-9-_ ]/gi, '-');
+  const results = await Promise.all(
+    Array.from(files).map(async (file) => {
+      const key = `${safeFolder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${file.name || 'photo'}`;
+      const blob = await upload(key, file, {
+        access: 'public',
+        handleUploadUrl: '/api/upload'
+      });
+      return {
+        id: 'photo_' + Math.random().toString(36).slice(2, 10),
+        url: blob.url,
+        name: file.name || 'photo',
+        createdAt: new Date().toISOString()
+      };
+    })
+  );
+  return results;
+}
 
 const NAV = [
   { id: 'overview', label: 'Overview' },
@@ -510,20 +533,12 @@ function AlbumModal({ entry, myName, onClose, onAddPhotos, onRemovePhoto, showTo
   async function handleFiles(files) {
     if (!files || !files.length) return;
     setUploading(true);
-    const fd = new FormData();
-    Array.from(files).forEach((f) => fd.append('files', f));
-    fd.append('folder', entry.name);
     try {
-      const res = await fetch('/api/upload', { method: 'POST', body: fd });
-      const data = await res.json();
-      if (data.error) {
-        showToast(data.error);
-      } else {
-        onAddPhotos(data.photos);
-        showToast('Photos added to the album');
-      }
+      const photos = await uploadPhotosToBlob(files, entry.name);
+      onAddPhotos(photos);
+      showToast('Photos added to the album');
     } catch (e) {
-      showToast('Upload failed — check your connection');
+      showToast(e.message || 'Upload failed — check your connection');
     }
     setUploading(false);
   }
@@ -822,19 +837,10 @@ function EntryModal({ mode, myName, regionOptions, onAddCategory, onClose, onSav
     try {
       let photos = [];
       if (files.length) {
-        const fd = new FormData();
-        files.forEach((f) => fd.append('files', f));
-        fd.append('folder', name.trim());
         try {
-          const upRes = await fetch('/api/upload', { method: 'POST', body: fd });
-          const upData = await upRes.json();
-          if (upData.error) {
-            showToast(upData.error + ' (saving without photos)');
-          } else {
-            photos = upData.photos;
-          }
+          photos = await uploadPhotosToBlob(files, name.trim());
         } catch (e) {
-          showToast('Photo upload failed — saving without photos');
+          showToast((e.message || 'Photo upload failed') + ' — saving without photos');
         }
       }
 
