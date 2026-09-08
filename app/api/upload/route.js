@@ -8,14 +8,13 @@ export const runtime = 'nodejs';
 // straight to Vercel Blob. This matters because Vercel Functions have a
 // hard 4.5MB request body limit that can't be raised — and phone photos
 // routinely exceed that. Client uploads bypass the function entirely.
+//
+// Note: we intentionally do NOT pre-check for BLOB_READ_WRITE_TOKEN here.
+// Vercel's Blob connection can authenticate either via that static token
+// OR via OIDC + BLOB_STORE_ID (the newer default when connecting a store
+// from the dashboard) — the @vercel/blob SDK tries both automatically.
+// A hard-coded token check would incorrectly block valid OIDC setups.
 export async function POST(request) {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
-    return NextResponse.json(
-      { error: 'Photo storage is not configured yet. Add the Vercel Blob integration to this project.' },
-      { status: 500 }
-    );
-  }
-
   const body = await request.json();
 
   try {
@@ -36,6 +35,10 @@ export async function POST(request) {
     });
     return NextResponse.json(jsonResponse);
   } catch (error) {
-    return NextResponse.json({ error: error.message || 'Upload authorization failed' }, { status: 400 });
+    console.error('[Fort Trails] Blob upload token error:', error);
+    return NextResponse.json(
+      { error: error.message || 'Upload authorization failed — check Blob store connection' },
+      { status: 400 }
+    );
   }
 }
