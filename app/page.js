@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { upload } from '@vercel/blob/client';
 import { MAHARASHTRA_DISTRICTS } from '../lib/districts';
 
 const RealMap = dynamic(() => import('../components/RealMap'), {
@@ -10,20 +9,48 @@ const RealMap = dynamic(() => import('../components/RealMap'), {
   loading: () => <div className="loading-hint">Loading map…</div>
 });
 
-// Uploads files straight from the browser to Vercel Blob (bypasses the
-// 4.5MB Vercel Function body limit that phone photos routinely exceed).
+// Uploads files directly from the browser to Vercel Blob using a short-lived
+// presigned URL (OIDC-authenticated server-side). The photo bytes never pass
+// through the Next.js function, so large phone photos aren't affected by
+// Vercel's function request size limit.
 async function uploadPhotosToBlob(files, folder) {
   const safeFolder = (folder || 'general').replace(/[^a-z0-9-_ ]/gi, '-');
   const results = await Promise.all(
     Array.from(files).map(async (file) => {
-      const key = `${safeFolder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${file.name || 'photo'}`;
-      const blob = await upload(key, file, {
-        access: 'public',
-        handleUploadUrl: '/api/upload'
+      const pathname = `${safeFolder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${file.name || 'photo'}`;
+
+      const tokenRes = await fetch('/api/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pathname })
       });
+
+      let tokenData;
+      try {
+        tokenData = await tokenRes.json();
+      } catch {
+        throw new Error(`Upload server returned status ${tokenRes.status}`);
+      }
+
+      if (!tokenRes.ok || !tokenData.presignedUrl) {
+        throw new Error(tokenData.error || 'Could not prepare photo upload');
+      }
+
+      const putRes = await fetch(tokenData.presignedUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type || 'application/octet-stream' },
+        body: file
+      });
+
+      if (!putRes.ok) {
+        let detail = '';
+        try { detail = await putRes.text(); } catch {}
+        throw new Error(`Photo upload failed (${putRes.status})${detail ? `: ${detail.slice(0, 160)}` : ''}`);
+      }
+
       return {
         id: 'photo_' + Math.random().toString(36).slice(2, 10),
-        url: blob.url,
+        url: tokenData.blobUrl,
         name: file.name || 'photo',
         createdAt: new Date().toISOString()
       };

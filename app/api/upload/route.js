@@ -1,44 +1,60 @@
-import { handleUpload } from '@vercel/blob/client';
+import { issueSignedToken, presignUrl } from '@vercel/blob';
 import { NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 
-// This route no longer receives the photo bytes themselves. Instead, the
-// browser asks it for a short-lived upload token, then uploads the file
-// straight to Vercel Blob. This matters because Vercel Functions have a
-// hard 4.5MB request body limit that can't be raised — and phone photos
-// routinely exceed that. Client uploads bypass the function entirely.
+// Generates a short-lived presigned PUT URL so the browser can upload
+// directly to Vercel Blob (bypassing the 4.5MB Vercel Function body limit).
 //
-// Note: we intentionally do NOT pre-check for BLOB_READ_WRITE_TOKEN here.
-// Vercel's Blob connection can authenticate either via that static token
-// OR via OIDC + BLOB_STORE_ID (the newer default when connecting a store
-// from the dashboard) — the @vercel/blob SDK tries both automatically.
-// A hard-coded token check would incorrectly block valid OIDC setups.
+// This uses issueSignedToken/presignUrl rather than the older
+// handleUpload()/upload() client-token flow, because this project's Blob
+// store authenticates via OIDC + BLOB_STORE_ID (the current default when
+// connecting a store from the Vercel dashboard) rather than a static
+// BLOB_READ_WRITE_TOKEN — and issueSignedToken supports OIDC automatically,
+// while the older flow only knows how to use a static token.
+//
+// The store is public, so only the upload (PUT) needs to be signed — the
+// resulting blob URL is directly viewable afterwards, no read-side proxy
+// needed.
 export async function POST(request) {
-  const body = await request.json();
-
   try {
-    const jsonResponse = await handleUpload({
-      body,
-      request,
-      onBeforeGenerateToken: async () => ({
-        allowedContentTypes: ['image/*', 'image/heic', 'image/heif'],
-        addRandomSuffix: true,
-        maximumSizeInBytes: 30 * 1024 * 1024 // 30MB per photo
-      }),
-      onUploadCompleted: async () => {
-        // No server-side bookkeeping needed here — the browser attaches the
-        // returned blob URL to the entry itself via /api/entries afterwards.
-        // Note: this callback isn't reachable when running on localhost,
-        // only once deployed — that's expected and harmless.
-      }
+    const body = await request.json();
+    const pathname = body?.pathname;
+    if (!pathname || typeof pathname !== 'string') {
+      return NextResponse.json({ error: 'Missing file path' }, { status: 400 });
+    }
+
+    const allowedContentTypes = ['image/*', 'image/heic', 'image/heif'];
+    const maximumSizeInBytes = 30 * 1024 * 1024; // 30MB per photo
+    const validUntil = Date.now() + 15 * 60 * 1000; // 15 minutes
+
+    const token = await issueSignedToken({
+      pathname,
+      operations: ['put'],
+      validUntil,
+      allowedContentTypes,
+      maximumSizeInBytes
     });
-    return NextResponse.json(jsonResponse);
+
+    const { presignedUrl } = await presignUrl(token, {
+      pathname,
+      operation: 'put',
+      access: 'public',
+      validUntil,
+      allowedContentTypes,
+      maximumSizeInBytes
+    });
+
+    // Public blobs are served from a clean, permanent URL that's separate
+    // from the presigned (query-string-signed) upload URL.
+    const blobUrl = presignedUrl.split('?')[0];
+
+    return NextResponse.json({ presignedUrl, blobUrl });
   } catch (error) {
-    console.error('[Fort Trails] Blob upload token error:', error);
+    console.error('[Fort Trails] Blob upload URL error:', error);
     return NextResponse.json(
-      { error: error.message || 'Upload authorization failed — check Blob store connection' },
-      { status: 400 }
+      { error: error?.message || 'Could not create a Vercel Blob upload URL' },
+      { status: 500 }
     );
   }
 }
