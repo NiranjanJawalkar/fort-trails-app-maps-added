@@ -78,6 +78,7 @@ export default function Home() {
   const [visitedFilter, setVisitedFilter] = useState('all');
   const [wishlistFilter, setWishlistFilter] = useState('all');
   const [entryModal, setEntryModal] = useState(null); // 'visited' | 'wishlist' | null
+  const [editingEntry, setEditingEntry] = useState(null); // entry object being edited, or null
   const [tripModalOpen, setTripModalOpen] = useState(false);
   const [openAlbum, setOpenAlbum] = useState(null); // entry id
 
@@ -246,6 +247,7 @@ export default function Home() {
                 addLabel="+ Log a visit"
                 renderExtra={(e) => <div className="stars">{'★'.repeat(e.rating || 0)}{'☆'.repeat(5 - (e.rating || 0))}</div>}
                 onDelete={deleteEntry}
+                onEdit={(e) => { setEditingEntry(e); setEntryModal(e.status); }}
               />
             )}
 
@@ -265,6 +267,7 @@ export default function Home() {
                   </button>
                 )}
                 onDelete={deleteEntry}
+                onEdit={(e) => { setEditingEntry(e); setEntryModal(e.status); }}
               />
             )}
 
@@ -294,11 +297,18 @@ export default function Home() {
           myName={myName}
           regionOptions={regionOptions}
           onAddCategory={addCategory}
-          onClose={() => setEntryModal(null)}
+          editingEntry={editingEntry}
+          onClose={() => { setEntryModal(null); setEditingEntry(null); }}
           onSaved={(entry) => {
-            setEntries((prev) => [...prev, entry]);
+            if (editingEntry) {
+              setEntries((prev) => prev.map((e) => (e.id === entry.id ? entry : e)));
+              showToast('Changes saved');
+            } else {
+              setEntries((prev) => [...prev, entry]);
+              showToast(entry.status === 'visited' ? 'Visit logged' : 'Added to wishlist');
+            }
             setEntryModal(null);
-            showToast(entry.status === 'visited' ? 'Visit logged' : 'Added to wishlist');
+            setEditingEntry(null);
           }}
           showToast={showToast}
         />
@@ -448,7 +458,7 @@ function getRecentPhotos(entries, limit) {
 }
 
 /* ---------------- List view (Visited / Wishlist) ---------------- */
-function ListView({ title, desc, items, filter, setFilter, regions, onAdd, addLabel, renderExtra, onDelete }) {
+function ListView({ title, desc, items, filter, setFilter, regions, onAdd, addLabel, renderExtra, onDelete, onEdit }) {
   const filtered = filter === 'all' ? items : items.filter((e) => e.region === filter);
   return (
     <div>
@@ -469,14 +479,14 @@ function ListView({ title, desc, items, filter, setFilter, regions, onAdd, addLa
         {filtered.length === 0 ? (
           <EmptyState title={`No ${title.toLowerCase()} yet`} sub="Once you add one, it shows up here." />
         ) : (
-          filtered.map((e) => <Card key={e.id} e={e} renderExtra={renderExtra} onDelete={onDelete} />)
+          filtered.map((e) => <Card key={e.id} e={e} renderExtra={renderExtra} onDelete={onDelete} onEdit={onEdit} />)
         )}
       </div>
     </div>
   );
 }
 
-function Card({ e, renderExtra, onDelete }) {
+function Card({ e, renderExtra, onDelete, onEdit }) {
   const cover = e.photos && e.photos.length ? e.photos[0].url : null;
   return (
     <div className="card">
@@ -497,9 +507,14 @@ function Card({ e, renderExtra, onDelete }) {
         {e.notes && <div className="card-notes">{e.notes}</div>}
         <div className="card-foot">
           {renderExtra ? renderExtra(e) : <span />}
-          {onDelete && (
-            <button className="icon-btn" onClick={() => onDelete(e.id)} title="Remove">✕</button>
-          )}
+          <div style={{ display: 'flex', gap: 4 }}>
+            {onEdit && (
+              <button className="icon-btn" onClick={() => onEdit(e)} title="Edit">✎</button>
+            )}
+            {onDelete && (
+              <button className="icon-btn" onClick={() => onDelete(e.id)} title="Remove">✕</button>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -779,7 +794,7 @@ function TripModal({ onClose, onSaved }) {
 }
 
 /* ---------------- Entry modal (with photo upload) ---------------- */
-function EntryModal({ mode, myName, regionOptions, onAddCategory, onClose, onSaved, showToast }) {
+function EntryModal({ mode, myName, regionOptions, onAddCategory, editingEntry, onClose, onSaved, showToast }) {
   const [name, setName] = useState('');
   const [region, setRegion] = useState('');
   const [difficulty, setDifficulty] = useState('Easy');
@@ -794,6 +809,22 @@ function EntryModal({ mode, myName, regionOptions, onAddCategory, onClose, onSav
   const [previews, setPreviews] = useState([]);
   const [saving, setSaving] = useState(false);
   const inputRef = useRef(null);
+  const isEditing = !!editingEntry;
+
+  useEffect(() => {
+    if (editingEntry) {
+      setName(editingEntry.name || '');
+      setRegion(editingEntry.region || '');
+      setDifficulty(editingEntry.difficulty || 'Easy');
+      setDate(editingEntry.date || '');
+      setCompanions(editingEntry.companions || '');
+      setRating(String(editingEntry.rating || 3));
+      setNotes(editingEntry.notes || '');
+      setLat(editingEntry.lat != null ? String(editingEntry.lat) : '');
+      setLng(editingEntry.lng != null ? String(editingEntry.lng) : '');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingEntry]);
 
   function handleRegionChange(e) {
     const val = e.target.value;
@@ -871,8 +902,55 @@ function EntryModal({ mode, myName, regionOptions, onAddCategory, onClose, onSav
           photos = await uploadPhotosToBlob(files, name.trim());
         } catch (e) {
           console.error('[Fort Trails] photo upload failed:', e);
-          showToast((e.message || 'Photo upload failed') + ' — saving without photos');
+          showToast((e.message || 'Photo upload failed') + ' — saving without new photos');
         }
+      }
+
+      if (isEditing) {
+        // Editing: update the core fields, and separately append any newly
+        // added photos to the existing album (rather than replacing it).
+        const fieldRes = await fetch(`/api/entries/${editingEntry.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            region,
+            difficulty,
+            date: mode === 'visited' ? date : '',
+            companions: mode === 'visited' ? companions : '',
+            rating: mode === 'visited' ? parseInt(rating, 10) : 0,
+            notes,
+            lat: lat.trim() ? parseFloat(lat) : null,
+            lng: lng.trim() ? parseFloat(lng) : null
+          })
+        });
+
+        let fieldData;
+        try {
+          fieldData = await fieldRes.json();
+        } catch (e) {
+          throw new Error(`Server returned an unexpected response (status ${fieldRes.status})`);
+        }
+        if (!fieldRes.ok || fieldData.error) {
+          throw new Error(fieldData.error || `Save failed (status ${fieldRes.status})`);
+        }
+
+        let finalEntry = fieldData.entry;
+
+        if (photos.length) {
+          const photoRes = await fetch(`/api/entries/${editingEntry.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'addPhotos', photos })
+          });
+          const photoData = await photoRes.json().catch(() => ({}));
+          if (photoRes.ok && photoData.entry) {
+            finalEntry = photoData.entry;
+          }
+        }
+
+        onSaved(finalEntry);
+        return;
       }
 
       const res = await fetch('/api/entries', {
@@ -916,7 +994,7 @@ function EntryModal({ mode, myName, regionOptions, onAddCategory, onClose, onSav
   return (
     <div className="overlay" onClick={(e) => e.target.classList.contains('overlay') && onClose()}>
       <div className="modal">
-        <h3>{mode === 'visited' ? 'Log a visit' : 'Add to wishlist'}</h3>
+        <h3>{isEditing ? `Edit ${mode === 'visited' ? 'visit' : 'wishlist place'}` : (mode === 'visited' ? 'Log a visit' : 'Add to wishlist')}</h3>
 
         <div className="field">
           <label>Name of fort / place</label>
@@ -997,14 +1075,14 @@ function EntryModal({ mode, myName, regionOptions, onAddCategory, onClose, onSav
         </div>
 
         <div className="field">
-          <label>Photos</label>
+          <label>Photos{isEditing ? ' (optional — adds to the existing album)' : ''}</label>
           <div
             className="dropzone"
             onClick={() => inputRef.current && inputRef.current.click()}
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
           >
-            Click or drag photos here — this becomes the album for this place
+            Click or drag photos here — {isEditing ? 'adds more to this album' : 'this becomes the album for this place'}
             <input
               ref={inputRef}
               type="file"
@@ -1030,7 +1108,7 @@ function EntryModal({ mode, myName, regionOptions, onAddCategory, onClose, onSav
 
         <div className="modal-actions">
           <button className="btn ghost" onClick={onClose}>Cancel</button>
-          <button className="btn rust" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+          <button className="btn rust" onClick={save} disabled={saving}>{saving ? 'Saving…' : (isEditing ? 'Save changes' : 'Save')}</button>
         </div>
       </div>
     </div>
