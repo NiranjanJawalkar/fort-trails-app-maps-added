@@ -133,39 +133,65 @@ export default function Home() {
   }
 
   async function upvote(id) {
-    const res = await fetch(`/api/entries/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'upvote' })
-    });
-    const data = await res.json();
-    setEntries((prev) => prev.map((e) => (e.id === id ? data.entry : e)));
+    try {
+      const res = await fetch(`/api/entries/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'upvote' })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || `Vote failed (${res.status})`);
+      setEntries((prev) => prev.map((e) => (e.id === id ? data.entry : e)));
+    } catch (e) {
+      console.error('[Fort Trails] upvote failed:', e);
+      showToast(e.message || 'Could not save vote');
+    }
   }
 
   async function deleteEntry(id) {
-    if (!confirm('Remove this entry for everyone?')) return;
-    await fetch(`/api/entries/${id}`, { method: 'DELETE' });
-    setEntries((prev) => prev.filter((e) => e.id !== id));
+    if (!confirm('Remove this entry for everyone? This also deletes its photos from storage.')) return;
+    try {
+      const res = await fetch(`/api/entries/${id}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) throw new Error(data.error || `Delete failed (${res.status})`);
+      setEntries((prev) => prev.filter((e) => e.id !== id));
+    } catch (e) {
+      console.error('[Fort Trails] delete entry failed:', e);
+      showToast(e.message || 'Could not delete — please try again');
+    }
   }
 
   async function addPhotosToEntry(id, photos) {
-    const res = await fetch(`/api/entries/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'addPhotos', photos })
-    });
-    const data = await res.json();
-    setEntries((prev) => prev.map((e) => (e.id === id ? data.entry : e)));
+    try {
+      const res = await fetch(`/api/entries/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'addPhotos', photos })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || `Save failed (${res.status})`);
+      setEntries((prev) => prev.map((e) => (e.id === id ? data.entry : e)));
+    } catch (e) {
+      console.error('[Fort Trails] addPhotos failed:', e);
+      showToast(e.message || 'Could not save photos');
+    }
   }
 
   async function removePhoto(entryId, photoId) {
-    const res = await fetch(`/api/entries/${entryId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'removePhoto', photoId })
-    });
-    const data = await res.json();
-    setEntries((prev) => prev.map((e) => (e.id === entryId ? data.entry : e)));
+    try {
+      const res = await fetch(`/api/entries/${entryId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'removePhoto', photoId })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || `Remove failed (${res.status})`);
+      setEntries((prev) => prev.map((e) => (e.id === entryId ? data.entry : e)));
+      showToast('Photo removed');
+    } catch (e) {
+      console.error('[Fort Trails] removePhoto failed:', e);
+      showToast(e.message || 'Could not remove photo — please try again');
+    }
   }
 
   async function deleteTrip(id) {
@@ -555,8 +581,8 @@ function GalleryView({ entries, onOpenAlbum }) {
           {withPhotos.map((e) => (
             <div className="album-card" key={e.id} onClick={() => onOpenAlbum(e.id)}>
               <div className="album-stack">
-                {e.photos[1] && <img className="stack-2" src={e.photos[1].url} alt="" />}
-                <img className="stack-1" src={e.photos[0].url} alt={e.name} />
+                {e.photos[1] && <img className="stack-2" src={e.photos[1].url} alt="" onError={(ev) => { ev.currentTarget.style.display = 'none'; }} />}
+                <img className="stack-1" src={e.photos[0].url} alt={e.name} onError={(ev) => { ev.currentTarget.style.display = 'none'; }} />
               </div>
               <div className="album-info">
                 <h4>{e.name}</h4>
@@ -566,6 +592,37 @@ function GalleryView({ entries, onOpenAlbum }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function PhotoThumb({ photo, onRemove }) {
+  const [broken, setBroken] = useState(false);
+  return (
+    <div className="ph">
+      {broken ? (
+        <div
+          style={{
+            height: 150,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexDirection: 'column',
+            gap: 4,
+            background: 'var(--stone)',
+            color: 'var(--ink-soft)',
+            fontSize: 11.5,
+            padding: 10,
+            textAlign: 'center'
+          }}
+        >
+          <span>⚠️ Broken link</span>
+          <span>Remove and re-upload</span>
+        </div>
+      ) : (
+        <img src={photo.url} alt="" onError={() => setBroken(true)} />
+      )}
+      <button className="rm" onClick={onRemove} title="Remove photo">✕</button>
     </div>
   );
 }
@@ -618,10 +675,7 @@ function AlbumModal({ entry, myName, onClose, onAddPhotos, onRemovePhoto, showTo
 
         <div className="lightbox-grid" style={{ marginTop: 16 }}>
           {(entry.photos || []).map((p) => (
-            <div className="ph" key={p.id}>
-              <img src={p.url} alt="" />
-              <button className="rm" onClick={() => onRemovePhoto(p.id)} title="Remove photo">✕</button>
-            </div>
+            <PhotoThumb key={p.id} photo={p} onRemove={() => onRemovePhoto(p.id)} />
           ))}
         </div>
 
