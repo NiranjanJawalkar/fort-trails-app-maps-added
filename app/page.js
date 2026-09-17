@@ -14,43 +14,30 @@ const RealMap = dynamic(() => import('../components/RealMap'), {
 // through the Next.js function, so large phone photos aren't affected by
 // Vercel's function request size limit.
 async function uploadPhotosToBlob(files, folder) {
-  const safeFolder = (folder || 'general').replace(/[^a-z0-9-_ ]/gi, '-');
+  const { upload } = await import('@vercel/blob/client');
+  const safeFolder = (folder || 'general').replace(/[^a-z0-9-_ ]/gi, '-').trim() || 'general';
+
   const results = await Promise.all(
     Array.from(files).map(async (file) => {
-      const pathname = `${safeFolder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${file.name || 'photo'}`;
+      const safeName = (file.name || 'photo').replace(/[^a-z0-9._-]/gi, '-');
+      const pathname = `${safeFolder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
 
-      const tokenRes = await fetch('/api/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pathname })
+      // Vercel's client upload flow returns the actual Blob object, including
+      // its permanent public URL. Do not construct a URL from a presigned URL.
+      const blob = await upload(pathname, file, {
+        access: 'public',
+        handleUploadUrl: '/api/upload',
+        contentType: file.type || 'application/octet-stream',
+        multipart: file.size > 4 * 1024 * 1024
       });
 
-      let tokenData;
-      try {
-        tokenData = await tokenRes.json();
-      } catch {
-        throw new Error(`Upload server returned status ${tokenRes.status}`);
-      }
-
-      if (!tokenRes.ok || !tokenData.presignedUrl) {
-        throw new Error(tokenData.error || 'Could not prepare photo upload');
-      }
-
-      const putRes = await fetch(tokenData.presignedUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type || 'application/octet-stream' },
-        body: file
-      });
-
-      if (!putRes.ok) {
-        let detail = '';
-        try { detail = await putRes.text(); } catch {}
-        throw new Error(`Photo upload failed (${putRes.status})${detail ? `: ${detail.slice(0, 160)}` : ''}`);
+      if (!blob?.url || !blob.url.includes('.blob.vercel-storage.com/')) {
+        throw new Error('Upload completed but Vercel did not return a valid public Blob URL');
       }
 
       return {
         id: 'photo_' + Math.random().toString(36).slice(2, 10),
-        url: tokenData.blobUrl,
+        url: blob.url,
         name: file.name || 'photo',
         createdAt: new Date().toISOString()
       };
